@@ -1,8 +1,9 @@
 #!/usr/bin/python
 
 import argparse
-import cv2
+import av
 import os
+import time
 import subprocess
 import shlex
 import json
@@ -17,16 +18,16 @@ class Geotag():
         self.tlog = tlog_path
         self.mp4 = mp4_path
         self.offset = offset
+        self.fps = 0
 
     def split_frames(self, vid_fname, output_dir):
-        cap = cv2.VideoCapture(vid_fname) 
-        ret, img = cap.read() 
-        count = 0 
-        while ret: 
-            cv2.imwrite(output_dir + ("/frame%05d.jpg" % count), img) 
-            ret, img = cap.read() 
-            count += 1
-        print("%s images written to %s." % (count, output_dir)
+        cap = av.open(vid_fname)
+        cap.streams.video[0].thread_type = 'AUTO'
+        self.fps = int(cap.streams.video[0].framerate)
+        for frame in cap.decode(video=0): 
+            frame.to_image().save(output_dir + ("/frame%07d.jpg" % frame.index)) 
+        print("Average fps is: %s." % self.fps)
+        print("%s images written to %s." % (frame.index, output_dir))
 
     def get_start_time(self, mp4_path):
     # connection to find the resolution of the input video file
@@ -42,26 +43,25 @@ class Geotag():
         timecode = ffprobeOutput['streams'][0]['tags']['timecode']
         fps = ffprobeOutput['streams'][0]['avg_frame_rate']
         frame = int(str(timecode)[9:11])
-        print("MP4 Start time is : %s and start frame is: %s:." % (t, frame))
+        print("MP4 Start time is: %s and start frame is: %s." % 
+                (t.replace("T", " ").split(".")[0], frame))
         return t, frame
-
 
     def tag_images(self):
         print("Creating gpx file...")
-        #ofname = self.tlog + ".gpx"
-        #mav_to_gpx(self.tlog, ofname)
-        print("gpx file created at: %s." % ofname)
+        gpx_fname = self.tlog + ".gpx"
+        mav_to_gpx(self.tlog, gpx_fname)
         
-        print("Creating directory of jpegs from MP4...")
+        print("Creating directory of jpegs from %s..." % self.mp4)
         try:
             os.mkdir(os.path.abspath(self.mp4).split('.')[0] + "_geotagged")
         except:
             print("Geotag directory already exists, overwriting.")
             pass
         output_dir = (os.path.abspath(self.mp4).split('.')[0] + "_geotagged")
-        #self.split_frames(self.mp4, output_dir)
+        self.split_frames(self.mp4, output_dir)
         
-        print("Getting video start time...")
+        print("Getting %s start time..." % self.mp4)
         t, frame = self.get_start_time(self.mp4)
         h, m, s = [int(i) for i in t.split('T')[1][:-8].split(':')]
         y, mon, d = [int(j) for j in t.split('T')[0].split('-')]
@@ -71,17 +71,22 @@ class Geotag():
         timestamp = start_time + datetime.timedelta(seconds=self.offset)
         timestring = timestamp.strftime("%Y:%m:%d %H:%M:%S")
         for img in sorted(glob.glob(output_dir + "/*.jpg")):
-            stamp_cmd = ['exiftool', '-S', '-overwrite_original_in_place', 
+            stamp_cmd = ['exiftool', '-S', '-overwrite_original_in_place',
                     "-DateTimeOriginal='%s'" % (timestring), img]
-            print(stamp_cmd)
-            ret = subprocess.call(stamp_cmd)
-            if (frame % 30 == 0):
+            p = subprocess.Popen(stamp_cmd)
+            if (frame % self.fps == 0):
                 timestamp =  timestamp + datetime.timedelta(seconds=1)
                 timestring = timestamp.strftime("%Y:%m:%d %H:%M:%S")
+            print("Timestamped %s." % img)
+            time.sleep(0.1)
             frame += 1
+        p.wait()
         
         print("Geotagging images...")
 
+        tag_cmd = ['exiftool', '-overwrite_original_in_place', '-geotag', 
+                gpx_fname, output_dir]
+        p = subprocess.call(tag_cmd)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Geotag images from a GoPro"
@@ -90,8 +95,9 @@ if __name__ == "__main__":
     parser.add_argument('mp4_path', type=str, help="Path to GoPro generated MP4.")
     parser.add_argument('time_offset', type=int, help="Time offset of Atomic clock - GoPro clock.")
     args = parser.parse_args()
-
+    if args.mp4_path.split(".")[-1] not in  ["mp4", "avi", "mov", "MP4"]:
+        print("Invalid second argument, must be a video file.")
+        raise SystemExit
     solo = Geotag(args.tlog_path, args.mp4_path, args.time_offset)
     solo.tag_images()
     print("Finished geotagging.")
-

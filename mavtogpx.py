@@ -16,10 +16,10 @@ def mav_to_gpx(infilename, outfilename):
     '''convert a mavlink log file to a GPX file'''
 
     mlog = mavutil.mavlink_connection(infilename)
-    outf = open(outfilename, mode='w')
+    outf = open(outfilename, mode='w+')
 
     def process_packet(timestamp, lat, lon, alt, hdg, v):
-        t = time.localtime(timestamp)
+        t = time.gmtime(timestamp) # in UTC so exiftool geotagging works
         outf.write('''<trkpt lat="%s" lon="%s">
   <ele>%s</ele>
   <time>%s</time>
@@ -98,4 +98,7 @@ def mav_to_gpx(infilename, outfilename):
         process_packet(timestamp, lat, lon, alt, hdg, v)
         count += 1
     add_footer()
+    if (count == 0):
+        print("Error: no valid gps points found in %s." % outf)
+        raise SystemExit
     print("Created %s with %u points" % (outfilename, count))
