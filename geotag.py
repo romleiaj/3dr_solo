@@ -1,5 +1,7 @@
 #!/usr/bin/python
 
+# __required__ exiftool, ffprobe
+
 import argparse
 import av
 import os
@@ -18,16 +20,16 @@ class Geotag():
         self.tlog = tlog_path
         self.mp4 = mp4_path
         self.offset = offset
-        self.fps = 0
+        self.fps = 0.0
 
     def split_frames(self, vid_fname, output_dir):
         cap = av.open(vid_fname)
         cap.streams.video[0].thread_type = 'AUTO'
-        self.fps = int(cap.streams.video[0].framerate)
-        for frame in cap.decode(video=0): 
-            frame.to_image().save(output_dir + ("/frame%07d.jpg" % frame.index)) 
+        self.fps = cap.streams.video[0].framerate
+        #for frame in cap.decode(video=0): 
+        #    frame.to_image().save(output_dir + ("/frame%07d.jpg" % frame.index)) 
         print("Average fps is: %s." % self.fps)
-        print("%s images written to %s." % (frame.index, output_dir))
+        #print("%s images written to %s." % (frame.index, output_dir))
 
     def get_start_time(self, mp4_path):
     # connection to find the resolution of the input video file
@@ -50,7 +52,7 @@ class Geotag():
     def tag_images(self):
         print("Creating gpx file...")
         gpx_fname = self.tlog + ".gpx"
-        mav_to_gpx(self.tlog, gpx_fname)
+        #mav_to_gpx(self.tlog, gpx_fname)
         
         print("Creating directory of jpegs from %s..." % self.mp4)
         try:
@@ -68,13 +70,19 @@ class Geotag():
         start_time = datetime.datetime(y, mon, d, h, m, s)
         
         print("Timestamping images...")
-        timestamp = start_time + datetime.timedelta(seconds=self.offset)
+        int_offset = int(self.offset)
+        frame_offset = int((self.offset - int_offset) * self.fps)
+        frame = (frame_offset + frame)
+        if (frame > self.fps):
+            int_offset += 1
+            frame = int(round(frame - self.fps))
+        timestamp = start_time + datetime.timedelta(seconds=int_offset)
         timestring = timestamp.strftime("%Y:%m:%d %H:%M:%S")
         for img in sorted(glob.glob(output_dir + "/*.jpg")):
             stamp_cmd = ['exiftool', '-S', '-overwrite_original_in_place',
                     "-DateTimeOriginal='%s'" % (timestring), img]
             p = subprocess.Popen(stamp_cmd)
-            if (frame % self.fps == 0):
+            if (frame % int(round(self.fps)) == 0):
                 timestamp =  timestamp + datetime.timedelta(seconds=1)
                 timestring = timestamp.strftime("%Y:%m:%d %H:%M:%S")
             print("Timestamped %s." % img)
@@ -90,10 +98,10 @@ class Geotag():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Geotag images from a GoPro"
-    "with 3DR Solo tlogs.")
+    " with 3DR Solo tlogs.")
     parser.add_argument('tlog_path', type=str, help="Path to Solo generated tlog file.")
     parser.add_argument('mp4_path', type=str, help="Path to GoPro generated MP4.")
-    parser.add_argument('time_offset', type=int, help="Time offset of Atomic clock - GoPro clock.")
+    parser.add_argument('time_offset', type=float, help="Time offset of Atomic clock - GoPro clock.")
     args = parser.parse_args()
     if args.mp4_path.split(".")[-1] not in  ["mp4", "avi", "mov", "MP4"]:
         print("Invalid second argument, must be a video file.")
