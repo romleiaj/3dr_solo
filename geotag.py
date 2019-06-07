@@ -26,10 +26,10 @@ class Geotag():
         cap = av.open(vid_fname)
         cap.streams.video[0].thread_type = 'AUTO'
         self.fps = cap.streams.video[0].framerate
-        #for frame in cap.decode(video=0): 
-        #    frame.to_image().save(output_dir + ("/frame%07d.jpg" % frame.index)) 
+        for frame in cap.decode(video=0): 
+            frame.to_image().save(output_dir + ("/frame%07d.jpg" % frame.index)) 
         print("Average fps is: %s." % self.fps)
-        #print("%s images written to %s." % (frame.index, output_dir))
+        print("%s images written to %s." % (frame.index, output_dir))
 
     def get_start_time(self, mp4_path):
     # connection to find the resolution of the input video file
@@ -52,7 +52,7 @@ class Geotag():
     def tag_images(self):
         print("Creating gpx file...")
         gpx_fname = self.tlog + ".gpx"
-        #mav_to_gpx(self.tlog, gpx_fname)
+        mav_to_gpx(self.tlog, gpx_fname)
         
         print("Creating directory of jpegs from %s..." % self.mp4)
         try:
@@ -71,30 +71,34 @@ class Geotag():
         
         print("Timestamping images...")
         int_offset = int(self.offset)
-        frame_offset = int((self.offset - int_offset) * self.fps)
+        frame_offset = int(round((self.offset - int_offset) * self.fps))
         frame = (frame_offset + frame)
         if (frame > self.fps):
             int_offset += 1
             frame = int(round(frame - self.fps))
         timestamp = start_time + datetime.timedelta(seconds=int_offset)
         timestring = timestamp.strftime("%Y:%m:%d %H:%M:%S")
+        stamp_cmd = ['exiftool', '-overwrite_original',
+                '-stay_open', 'True', '-@', '-', '-fast4']               
+        p = subprocess.Popen(stamp_cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+        # Use exiftool to write timestamp based on video start time and video fps
         for img in sorted(glob.glob(output_dir + "/*.jpg")):
-            stamp_cmd = ['exiftool', '-S', '-overwrite_original_in_place',
-                    "-DateTimeOriginal='%s'" % (timestring), img]
-            p = subprocess.Popen(stamp_cmd)
             if (frame % int(round(self.fps)) == 0):
                 timestamp =  timestamp + datetime.timedelta(seconds=1)
                 timestring = timestamp.strftime("%Y:%m:%d %H:%M:%S")
-            print("Timestamped %s." % img)
-            time.sleep(0.1)
+            p.stdin.write("-DateTimeOriginal='%s'\n%s\n-execute\n" % (timestring, img))
+            p.stdin.flush()
+            print("Timestamped image %s." % img)
             frame += 1
-        p.wait()
         
         print("Geotagging images...")
 
-        tag_cmd = ['exiftool', '-overwrite_original_in_place', '-geotag', 
-                gpx_fname, output_dir]
-        p = subprocess.call(tag_cmd)
+        p.stdin.write("-geotag\n%s\n%s\n-execute\n" % (gpx_fname, output_dir))
+        p.stdin.flush()
+        p.stdin.write('-stay_open\nFalse\n')
+        p.stdin.flush()
+        p.stdin.close()
+        p.wait()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Geotag images from a GoPro"
