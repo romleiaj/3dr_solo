@@ -5,3 +5,10 @@ Must download both scripts, as mavtogpx.py is called from geotag.py.
 #### Required Binaries
 * ffprobe
 * exiftool
+#### Required Python Packages
+* pymavlink
+* av
+* shlex
+* json 
+* datetime
+* argparse
